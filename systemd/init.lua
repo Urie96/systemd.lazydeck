@@ -1,181 +1,160 @@
--- systemd.lazycmd - Systemd service manager
+local config = require 'systemd.config'
+local meta = require 'systemd.meta'
 
 local M = {}
 
--- systemd 单元类型列表（带图标）
-local unit_types = {
-  { name = 'service', icon = '⚙️' },
-  { name = 'mount', icon = '💾' },
-  { name = 'swap', icon = '🔄' },
-  { name = 'socket', icon = '🔌' },
-  { name = 'target', icon = '🎯' },
-  { name = 'device', icon = '💻' },
-  { name = 'automount', icon = '📂' },
-  { name = 'timer', icon = '⏰' },
-  { name = 'path', icon = '📁' },
-  { name = 'slice', icon = '📊' },
-  { name = 'scope', icon = '📦' },
-}
-
-function M.setup()
-  lc.keymap.set('main', '<enter>', function()
-    local path = lc.api.get_current_path()
-    if #path < 3 then
-      lc.cmd 'enter'
-    else
-      require('systemd.action').select_action()
-    end
-  end)
+local function span(text, color)
+  local s = lc.style.span(tostring(text or ''))
+  if color and color ~= '' then s = s:fg(color) end
+  return s
 end
 
--- 第1级：显示 system 和 user 两个选项
-local function list_level_1(cb)
-  local entries = {
-    {
-      key = 'system',
-      display = ('🖥️ system'):fg 'cyan',
-      scope = 'system',
-    },
-    {
-      key = 'user',
-      display = ('👤 user'):fg 'cyan',
-      scope = 'user',
+local function line(parts) return lc.style.line(parts) end
+
+local function scope_entry(scope)
+  local icon = scope == 'system' and '󰍹' or '󰀄'
+  local color = scope == 'system' and 'cyan' or 'green'
+  local label = scope == 'system' and 'System' or 'User'
+  return {
+    key = scope,
+    kind = 'scope',
+    scope = scope,
+    display = line {
+      span(icon, color),
+      span(' ', 'darkgray'),
+      span(label, 'white'),
     },
   }
-  cb(entries)
 end
 
--- 第2级：显示所有单元类型
-local function list_level_2(path, cb)
+local function type_entry(scope, unit_type)
+  local label = unit_type.name:gsub('^%l', string.upper)
+  return {
+    key = unit_type.name,
+    kind = 'type',
+    scope = scope,
+    unit_type = unit_type.name,
+    icon = unit_type.icon,
+    display = line {
+      span(unit_type.icon .. ' ' .. label, 'yellow'),
+    },
+  }
+end
+
+local function unit_state_color(load_state, active_state)
+  if load_state == 'not-found' then return 'yellow' end
+  if active_state == 'active' then return 'green' end
+  if active_state == 'failed' then return 'red' end
+  if active_state == 'activating' or active_state == 'deactivating' then return 'yellow' end
+  return 'white'
+end
+
+local function build_unit_entries(scope, unit_type, data)
   local entries = {}
-  for _, unit_type in ipairs(unit_types) do
+  for _, unit in ipairs(data or {}) do
+    local unit_name = unit.unit
+    local load_state = unit.load or ''
+    local active_state = unit.active or ''
+    local sub_state = unit.sub or ''
+    local description = unit.description or ''
+
     table.insert(entries, {
-      key = unit_type.name,
-      display = lc.style.line({ (unit_type.icon .. ' ' .. unit_type.name):fg 'yellow' }),
-      unit_type = unit_type.name,
-      scope = path[2],
+      key = unit_name,
+      kind = 'unit',
+      unit = unit_name,
+      load = load_state,
+      active = active_state,
+      sub = sub_state,
+      description = description,
+      scope = scope,
+      type = unit_type,
+      display = line {
+        span(unit_name, unit_state_color(load_state, active_state)),
+        span(description ~= '' and ('  ' .. description) or '', 'darkgray'),
+      },
     })
   end
-  cb(entries)
+  return meta.attach(entries)
 end
 
--- 第3级：显示指定类型和作用域的所有单元
-local function list_level_3(path, cb)
-  local scope = path[2] -- system 或 user
-  local unit_type = path[3] -- service, mount 等
-
-  -- 使用 JSON 输出获取单元列表
-  local cmd =
-    { 'systemctl', '--' .. scope, 'list-units', '--type=' .. unit_type, '--all', '--output=json', '--no-pager' }
+local function list_units(path, cb)
+  local scope = path[2]
+  local unit_type = path[3]
+  local cmd = {
+    config.get().command,
+    '--' .. scope,
+    'list-units',
+    '--type=' .. unit_type,
+    '--all',
+    '--output=json',
+    '--no-pager',
+  }
 
   lc.system(cmd, function(out)
     if out.code ~= 0 then
       lc.log('error', 'Failed to list units: {}', out.stderr or 'Unknown error')
-      cb {}
+      cb(meta.attach {
+        {
+          key = 'error',
+          kind = 'info',
+          title = 'systemd',
+          message = 'Failed to list units',
+          detail = out.stderr or 'Unknown error',
+          color = 'red',
+        },
+      })
       return
     end
 
-    -- 解析 JSON 输出
     local success, data = pcall(lc.json.decode, out.stdout)
     if not success or type(data) ~= 'table' then
       lc.log('error', 'Failed to parse JSON output: {}', data or 'Unknown error')
-      cb {}
+      cb(meta.attach {
+        {
+          key = 'error',
+          kind = 'info',
+          title = 'systemd',
+          message = 'Failed to parse units JSON',
+          detail = tostring(data or 'Unknown error'),
+          color = 'red',
+        },
+      })
       return
     end
 
-    -- 构建条目列表
-    local entries = {}
-    for _, unit in ipairs(data) do
-      local unit_name = unit.unit
-      local load_state = unit.load or ''
-      local active_state = unit.active or ''
-      local sub_state = unit.sub or ''
-      local description = unit.description or ''
-
-      -- 根据 load_state 和 active_state 选择颜色
-      local display = unit_name
-      if load_state == 'not-found' then
-        display = display:fg 'yellow'
-      elseif active_state == 'active' then
-        display = display:fg 'green'
-      elseif active_state == 'failed' then
-        display = display:fg 'red'
-      elseif active_state == 'inactive' then
-        display = display
-      elseif active_state == 'activating' or active_state == 'deactivating' then
-        display = display:fg 'yellow'
-      else
-        display = display
-      end
-
-      table.insert(entries, {
-        key = unit_name,
-        unit = unit_name,
-        load = load_state,
-        active = active_state,
-        sub = sub_state,
-        description = description,
-        display = display,
-        scope = scope,
-        type = unit_type,
-      })
-    end
-
-    cb(entries)
+    cb(build_unit_entries(scope, unit_type, data))
   end)
+end
+
+function M.setup(opt)
+  config.setup(opt or {})
+  meta.setup(config.get())
 end
 
 function M.list(path, cb)
   if #path == 1 then
-    -- 第1级：system / user
-    list_level_1(cb)
-  elseif #path == 2 then
-    -- 第2级：单元类型
-    list_level_2(path, cb)
-  elseif #path == 3 then
-    -- 第3级：具体单元
-    list_level_3(path, cb)
-  else
-    cb {}
-  end
-end
-
-function M.preview(entry, cb)
-  local path = lc.api.get_current_path()
-
-  -- 第1级：显示提示信息
-  if #path == 1 then
-    cb 'Select system or user scope'
+    cb(meta.attach {
+      scope_entry('system'),
+      scope_entry('user'),
+    })
     return
   end
 
-  -- 第2级：显示类型描述
   if #path == 2 then
-    local scope = path[2]
-    local lines = {
-      'Scope: ' .. scope,
-      '',
-      'Select a unit type to view units:',
-    }
-    for _, unit_type in ipairs(unit_types) do
-      table.insert(lines, '  • ' .. unit_type.icon .. ' ' .. unit_type.name)
+    local entries = {}
+    for _, unit_type in ipairs(config.get().unit_types or {}) do
+      table.insert(entries, type_entry(path[2], unit_type))
     end
-    cb(table.concat(lines, '\n'))
+    cb(meta.attach(entries))
     return
   end
 
-  -- 第3级：显示单元详细状态
-  if #path == 3 and entry and entry.unit then
-    local scope = path[2]
-    lc.system({ 'systemctl', '--' .. scope, 'status', '--no-pager', '--', entry.unit }, {
-      env = {
-        SYSTEMD_COLORS = '1',
-      },
-    }, function(out) cb((out.stdout .. out.stderr):ansi()) end)
+  if #path == 3 then
+    list_units(path, cb)
     return
   end
 
-  cb 'No preview available'
+  cb(meta.attach {})
 end
 
 return M

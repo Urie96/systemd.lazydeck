@@ -1,16 +1,25 @@
 local M = {}
+local config = require 'systemd.config'
+
+local function line(parts) return lc.style.line(parts) end
+local function text(lines) return lc.style.text(lines) end
+local function span(value, color)
+  local s = lc.style.span(tostring(value or ''))
+  if color and color ~= '' then s = s:fg(color) end
+  return s
+end
 
 -- 辅助函数：获取当前选中的单元信息
 local function get_selected_unit()
   local entry = lc.api.page_get_hovered()
-  if not entry or not entry.unit then return nil end
+  if not entry or entry.kind ~= 'unit' or not entry.unit then return nil end
   return entry
 end
 
 -- 辅助函数：获取 unit 的活动状态和启用状态
 local function get_unit_status(unit_info, callback)
   lc.system.exec(
-    { 'systemctl', '--' .. unit_info.scope, 'is-enabled', unit_info.unit },
+    { config.get().command, '--' .. unit_info.scope, 'is-enabled', unit_info.unit },
     function(enabled_output)
       callback {
         is_enabled = enabled_output.code == 0,
@@ -30,9 +39,13 @@ local function do_unit_action(action_name)
   if unit_info.scope == 'system' then cmd = { 'sudo' } end
 
   if action_name == 'follow' then
-    cmd = lc.tbl_extend('force', cmd, { 'journalctl', '--' .. unit_info.scope, '-xef', '--unit=' .. unit_info.unit })
+    cmd = lc.tbl_extend(
+      'force',
+      cmd,
+      { config.get().journal_command, '--' .. unit_info.scope, '-xef', '--unit=' .. unit_info.unit }
+    )
   else
-    cmd = lc.tbl_extend('force', cmd, { 'systemctl', '--' .. unit_info.scope, action_name, unit_info.unit })
+    cmd = lc.tbl_extend('force', cmd, { config.get().command, '--' .. unit_info.scope, action_name, unit_info.unit })
   end
 
   lc.interactive(cmd, { wait_confirm = function(exit_code) return exit_code ~= 0 end }, function(exit_code)
@@ -133,6 +146,39 @@ function M.select_action()
       if choice then require('systemd.action')[choice]() end
     end)
   end)
+end
+
+function M.scope_preview(entry)
+  return text {
+    line { span('Scope', 'cyan'), span(': ' .. tostring(entry.scope or ''), 'white') },
+    line { '' },
+    line { span('Enter to browse unit types in this scope.', 'darkgray') },
+  }
+end
+
+function M.type_preview(entry)
+  return text {
+    line { span('Type', 'cyan'), span(': ' .. tostring(entry.unit_type or ''), 'white') },
+    line { span('Scope', 'cyan'), span(': ' .. tostring(entry.scope or ''), 'white') },
+    line { '' },
+    line { span('Enter to list matching units.', 'darkgray') },
+  }
+end
+
+function M.unit_preview(entry, cb)
+  lc.system({ config.get().command, '--' .. entry.scope, 'status', '--no-pager', '--', entry.unit }, {
+    env = {
+      SYSTEMD_COLORS = '1',
+    },
+  }, function(out) cb((out.stdout .. out.stderr):ansi()) end)
+end
+
+function M.info_preview(entry)
+  return text {
+    line { span(entry.title or 'systemd', 'cyan') },
+    line { span(entry.message or '', entry.color or 'darkgray') },
+    line { span(entry.detail or '', 'darkgray') },
+  }
 end
 
 return M
