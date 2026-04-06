@@ -11,7 +11,7 @@ end
 
 -- 辅助函数：获取当前选中的单元信息
 local function get_selected_unit()
-  local entry = lc.api.page_get_hovered()
+  local entry = lc.api.get_hovered()
   if not entry or entry.kind ~= 'unit' or not entry.unit then return nil end
   return entry
 end
