@@ -1,24 +1,24 @@
 local M = {}
 local config = require 'systemd.config'
 
-local function line(parts) return lc.style.line(parts) end
-local function text(lines) return lc.style.text(lines) end
+local function line(parts) return deck.style.line(parts) end
+local function text(lines) return deck.style.text(lines) end
 local function span(value, color)
-  local s = lc.style.span(tostring(value or ''))
+  local s = deck.style.span(tostring(value or ''))
   if color and color ~= '' then s = s:fg(color) end
   return s
 end
 
 -- 辅助函数：获取当前选中的单元信息
 local function get_selected_unit()
-  local entry = lc.api.get_hovered()
+  local entry = deck.api.get_hovered()
   if not entry or entry.kind ~= 'unit' or not entry.unit then return nil end
   return entry
 end
 
 -- 辅助函数：获取 unit 的活动状态和启用状态
 local function get_unit_status(unit_info, callback)
-  lc.system.exec(
+  deck.system.exec(
     { config.get().command, '--' .. unit_info.scope, 'is-enabled', unit_info.unit },
     function(enabled_output)
       callback {
@@ -31,7 +31,7 @@ end
 local function do_unit_action(action_name)
   local unit_info = get_selected_unit()
   if not unit_info then
-    lc.notify 'Please select a unit first'
+    deck.notify 'Please select a unit first'
     return
   end
 
@@ -39,21 +39,21 @@ local function do_unit_action(action_name)
   if unit_info.scope == 'system' then cmd = { 'sudo' } end
 
   if action_name == 'follow' then
-    cmd = lc.tbl_extend(
+    cmd = deck.tbl_extend(
       'force',
       cmd,
       { config.get().journal_command, '--' .. unit_info.scope, '-xef', '--unit=' .. unit_info.unit }
     )
   else
-    cmd = lc.tbl_extend('force', cmd, { config.get().command, '--' .. unit_info.scope, action_name, unit_info.unit })
+    cmd = deck.tbl_extend('force', cmd, { config.get().command, '--' .. unit_info.scope, action_name, unit_info.unit })
   end
 
-  lc.interactive(cmd, { wait_confirm = function(exit_code) return exit_code ~= 0 end }, function(exit_code)
+  deck.interactive(cmd, { wait_confirm = function(exit_code) return exit_code ~= 0 end }, function(exit_code)
     if exit_code == 0 then
-      lc.notify(action_name .. ' for ' .. unit_info.unit .. ' successfully')
-      lc.cmd 'reload'
+      deck.notify(action_name .. ' for ' .. unit_info.unit .. ' successfully')
+      deck.cmd 'reload'
     else
-      lc.notify(action_name .. ' for ' .. unit_info.unit .. ' failed')
+      deck.notify(action_name .. ' for ' .. unit_info.unit .. ' failed')
     end
   end)
 end
@@ -79,7 +79,7 @@ function M.cat() do_unit_action 'cat' end
 function M.select_action()
   local unit_info = get_selected_unit()
   if not unit_info then
-    lc.notify 'Please select a unit first'
+    deck.notify 'Please select a unit first'
     return
   end
 
@@ -88,58 +88,58 @@ function M.select_action()
 
     table.insert(options, {
       value = 'follow',
-      display = lc.style.line { ('📋 Follow'):fg 'cyan' },
+      display = deck.style.line { ('📋 Follow'):fg 'cyan' },
     })
 
     if unit_info.active == 'active' then
       table.insert(options, {
         value = 'restart',
-        display = lc.style.line { ('🔄 Restart'):fg 'red' },
+        display = deck.style.line { ('🔄 Restart'):fg 'red' },
       })
       table.insert(options, {
         value = 'stop',
-        display = lc.style.line { ('⏹️ Stop'):fg 'red' },
+        display = deck.style.line { ('⏹️ Stop'):fg 'red' },
       })
     else
       table.insert(options, {
         value = 'start',
-        display = lc.style.line { ('▶️ Start'):fg 'green' },
+        display = deck.style.line { ('▶️ Start'):fg 'green' },
       })
     end
 
     if status.is_enabled then
       table.insert(options, {
         value = 'disable',
-        display = lc.style.line { ('🔓 Disable'):fg 'red' },
+        display = deck.style.line { ('🔓 Disable'):fg 'red' },
       })
     else
       table.insert(options, {
         value = 'enable',
-        display = lc.style.line { ('🔒 Enable'):fg 'green' },
+        display = deck.style.line { ('🔒 Enable'):fg 'green' },
       })
     end
 
     -- reload 选项
     table.insert(options, {
       value = 'reload',
-      display = lc.style.line { ('🔃 Reload'):fg 'blue' },
+      display = deck.style.line { ('🔃 Reload'):fg 'blue' },
     })
 
     -- edit/show/cat 选项
     table.insert(options, {
       value = 'edit',
-      display = lc.style.line { ('✏️ Edit'):fg 'yellow' },
+      display = deck.style.line { ('✏️ Edit'):fg 'yellow' },
     })
     table.insert(options, {
       value = 'show',
-      display = lc.style.line { ('📄 Show'):fg 'yellow' },
+      display = deck.style.line { ('📄 Show'):fg 'yellow' },
     })
     table.insert(options, {
       value = 'cat',
-      display = lc.style.line { ('📜 Cat'):fg 'yellow' },
+      display = deck.style.line { ('📜 Cat'):fg 'yellow' },
     })
 
-    lc.select({
+    deck.select({
       prompt = 'Select an action',
       options = options,
     }, function(choice)
@@ -166,7 +166,7 @@ function M.type_preview(entry)
 end
 
 function M.unit_preview(entry, cb)
-  lc.system({ config.get().command, '--' .. entry.scope, 'status', '--no-pager', '--', entry.unit }, {
+  deck.system({ config.get().command, '--' .. entry.scope, 'status', '--no-pager', '--', entry.unit }, {
     env = {
       SYSTEMD_COLORS = '1',
     },

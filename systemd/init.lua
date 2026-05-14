@@ -4,12 +4,12 @@ local meta = require 'systemd.meta'
 local M = {}
 
 local function span(text, color)
-  local s = lc.style.span(tostring(text or ''))
+  local s = deck.style.span(tostring(text or ''))
   if color and color ~= '' then s = s:fg(color) end
   return s
 end
 
-local function line(parts) return lc.style.line(parts) end
+local function line(parts) return deck.style.line(parts) end
 
 local function scope_entry(scope)
   local icon = scope == 'system' and '󰍹' or '󰀄'
@@ -90,9 +90,9 @@ local function list_units(path, cb)
     '--no-pager',
   }
 
-  lc.system(cmd, function(out)
+  deck.system(cmd, function(out)
     if out.code ~= 0 then
-      lc.log('error', 'Failed to list units: {}', out.stderr or 'Unknown error')
+      deck.log('error', 'Failed to list units: {}', out.stderr or 'Unknown error')
       cb(meta.attach {
         {
           key = 'error',
@@ -106,9 +106,9 @@ local function list_units(path, cb)
       return
     end
 
-    local success, data = pcall(lc.json.decode, out.stdout)
+    local success, data = pcall(deck.json.decode, out.stdout)
     if not success or type(data) ~= 'table' then
-      lc.log('error', 'Failed to parse JSON output: {}', data or 'Unknown error')
+      deck.log('error', 'Failed to parse JSON output: {}', data or 'Unknown error')
       cb(meta.attach {
         {
           key = 'error',
