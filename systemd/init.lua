@@ -3,6 +3,14 @@ local meta = require 'systemd.meta'
 
 local M = {}
 
+function M.meta()
+  return {
+    icon = '󰍛',
+    desc = 'systemd unit manager',
+    color = 'blue',
+  }
+end
+
 local function span(text, color)
   local s = deck.style.span(tostring(text or ''))
   if color and color ~= '' then s = s:fg(color) end
