@@ -1,5 +1,5 @@
 local config = require 'systemd.config'
-local meta = require 'systemd.meta'
+local action = require 'systemd.action'
 
 local M = {}
 
@@ -82,7 +82,7 @@ local function build_unit_entries(scope, unit_type, data)
       },
     })
   end
-  return meta.attach(entries)
+  return entries
 end
 
 local function list_units(path, cb)
@@ -101,10 +101,11 @@ local function list_units(path, cb)
   deck.system(cmd, function(out)
     if out.code ~= 0 then
       deck.log('error', 'Failed to list units: {}', out.stderr or 'Unknown error')
-      cb(meta.attach {
+      cb({
         {
           key = 'error',
           kind = 'info',
+          selectable = false,
           title = 'systemd',
           message = 'Failed to list units',
           detail = out.stderr or 'Unknown error',
@@ -117,10 +118,11 @@ local function list_units(path, cb)
     local success, data = pcall(deck.json.decode, out.stdout)
     if not success or type(data) ~= 'table' then
       deck.log('error', 'Failed to parse JSON output: {}', data or 'Unknown error')
-      cb(meta.attach {
+      cb({
         {
           key = 'error',
           kind = 'info',
+          selectable = false,
           title = 'systemd',
           message = 'Failed to parse units JSON',
           detail = tostring(data or 'Unknown error'),
@@ -134,14 +136,37 @@ local function list_units(path, cb)
   end)
 end
 
+local function register_page_keymaps()
+  local keymap = (config.get() or {}).keymap or {}
+  local path = '/systemd/*/*'
+
+  local function map(key, callback, desc)
+    if key and key ~= '' then
+      deck.keymap.set('main', key, callback, { path = path, desc = desc })
+    end
+  end
+
+  map(keymap.action, action.select_action, 'unit actions')
+  map(keymap.start, action.start, 'start unit')
+  map(keymap.stop, action.stop, 'stop unit')
+  map(keymap.restart, action.restart, 'restart unit')
+  map(keymap.enable, action.enable, 'enable unit')
+  map(keymap.disable, action.disable, 'disable unit')
+  map(keymap.reload, action.reload, 'reload unit')
+  map(keymap.follow, action.follow, 'follow logs')
+  map(keymap.edit, action.edit, 'edit unit')
+  map(keymap.show, action.show, 'show unit')
+  map(keymap.cat, action.cat, 'cat unit')
+end
+
 function M.setup(opt)
   config.setup(opt or {})
-  meta.setup(config.get())
+  register_page_keymaps()
 end
 
 function M.list(path, cb)
   if #path == 1 then
-    cb(meta.attach {
+    cb({
       scope_entry('system'),
       scope_entry('user'),
     })
@@ -153,7 +178,7 @@ function M.list(path, cb)
     for _, unit_type in ipairs(config.get().unit_types or {}) do
       table.insert(entries, type_entry(path[2], unit_type))
     end
-    cb(meta.attach(entries))
+    cb(entries)
     return
   end
 
@@ -162,7 +187,31 @@ function M.list(path, cb)
     return
   end
 
-  cb(meta.attach {})
+  cb({})
+end
+
+function M.preview(entry, cb)
+  if not entry then
+    cb(deck.style.text { deck.style.line { 'systemd' } })
+    return
+  end
+
+  if entry.kind == 'scope' then
+    cb(action.scope_preview(entry))
+    return
+  end
+
+  if entry.kind == 'type' then
+    cb(action.type_preview(entry))
+    return
+  end
+
+  if entry.kind == 'unit' then
+    action.unit_preview(entry, cb)
+    return
+  end
+
+  cb(action.info_preview(entry))
 end
 
 return M
