@@ -50,17 +50,27 @@ local function do_unit_action(action_name)
   -- 交互式动作（follow/edit/show/cat 需要终端输出）：保持 interactive，
   -- 系统作用域仍用 sudo（走 tty 提示符）
   if not CONTROL_ACTIONS[action_name] then
+    -- 注意：此处必须用 list_extend 拼接。deck.tbl_extend / deck.tbl_deep_extend 是按 key
+    -- 合并的字典语义，{'sudo'} 与后续 argv 的 key 都是 1，'force' 下会把 argv[1] 覆盖成
+    -- journalctl/systemctl，导致 sudo 被静默丢弃（system 作用域会因权限不足失败）。
     local cmd = {}
-    if needs_sudo then cmd = { 'sudo' } end
+    if needs_sudo then cmd[#cmd + 1] = 'sudo' end
 
     if action_name == 'follow' then
-      cmd = deck.tbl_extend(
-        'force',
+      -- system 作用域用 -m（merge）而不是 --system：journald 默认 SplitMode=uid 时，
+      -- User=<普通用户> 的 system unit 的进程输出会被写进 user-<uid>.journal，
+      -- 而 --system 只看 system.journal，会漏掉脚本自身的输出（只剩 systemd[1] 的
+      -- Starting/Finished/Failed）。-m 合并所有可读 journal（配合 sudo 即全集）。
+      -- 注意：不能再用 -e/--pager-end，systemd 252 下 -m 与它冲突，会报
+      -- "Using --boot or --list-boots with --merge is not supported."；
+      -- 用 -n1000 代替（-e 本来就是隐含 -n1000 + 跳到末尾）。
+      local scope_arg = unit_info.scope == 'system' and '-m' or '--user'
+      cmd = deck.list_extend(
         cmd,
-        { config.get().journal_command, '--' .. unit_info.scope, '-xef', '--unit=' .. unit_info.unit }
+        { config.get().journal_command, scope_arg, '-n1000', '-xf', '--unit=' .. unit_info.unit }
       )
     else
-      cmd = deck.tbl_extend('force', cmd, { config.get().command, '--' .. unit_info.scope, action_name, unit_info.unit })
+      cmd = deck.list_extend(cmd, { config.get().command, '--' .. unit_info.scope, action_name, unit_info.unit })
     end
 
     deck.interactive(cmd, { wait_confirm = function(exit_code) return exit_code ~= 0 end }, function(exit_code)
